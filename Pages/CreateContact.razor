@@ -1,0 +1,123 @@
+﻿@page "/createcontact"
+@using JWT.Auth.BlazorUi.Models
+@using System.Net.Http.Headers
+@using JWT.Auth.BlazorUi.Services
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using Microsoft.Extensions.Logging
+@inject NavigationManager NavigationManager
+@inject IHttpClientFactory ClientFactory
+@using System.Text.Json.Serialization
+@using System.Net.Http.Json
+@inject IAccessTokenProvider TokenProvider
+@inject ILogger<Contacts> logger
+@inject HttpClient Http
+
+
+ <h3>Créer un contact</h3>
+
+        @if (newContact != null)
+        {
+        <form>
+        <div class="form-group">
+            <label for="inputNom">Nom</label>
+            <input type="text" class="form-control" id="inputLastname" placeholder="Nom" @bind="newContact.lastname">
+        </div>
+       <div class="form-group">
+                    <label for="inputPrenom">Prénom</label>
+                    <input type="text" class="form-control" id="inputFirstName" placeholder="Prénom" @bind="newContact.firstname">
+                </div>
+                <div class="form-group">
+                    <label for="prenom">Email</label>
+                    <input type="text" class="form-control" id="prenom" placeholder="Prenom" @bind="newContact.emailaddress1">
+                </div>
+        <div style="margin-top: 20px;">
+            @*     <button type="button" class="btn btn-outline-primary" @onclick="()=> SetParameterAsync()">Sauvegarder</button>
+        *@            <button type="button" class="btn btn-outline-primary" @onclick="SetParameterAsync">Sauvegarder</button>
+
+        </div>
+            </form>
+        }
+        else
+        {
+            <p>Le contact n'a pas été trouvé.</p>
+        }
+    
+
+@code {
+    private Contact newContact = new Contact();
+
+    public Guid contactId { get; set; } = Guid.NewGuid();
+    private string message = "Loading...";
+
+    protected async Task SetParameterAsync()
+    {
+        if (string.IsNullOrEmpty(newContact.lastname))
+        {
+            logger.LogInformation("Le nom du Contact est requis");
+            return;
+        }
+        newContact.contactid = contactId;
+
+        await CreateContactAsync(newContact);
+        NavigationManager.NavigateTo($"/contacts");
+    }
+
+    public async Task<Contact> CreateContactAsync(Contact newContact)
+    {
+        try
+        {
+            //Tries to get an access token for the current user with the default set of permissions.
+            var tokenResult = await TokenProvider.RequestAccessToken();
+            // If the token request was successful
+            if (tokenResult.TryGetToken(out var token))
+            {
+                // Creates an HttpClient based on the named definition found in Program.Main
+                var client = ClientFactory.CreateClient("DataverseClient");
+                // Prepare the request to get the account by its ID
+                var requestUri = $"{client.BaseAddress}contacts";
+
+                var request = new HttpRequestMessage()
+                    {
+                        Method = HttpMethod.Post,
+                        RequestUri = new Uri(requestUri),
+                        Content = JsonContent.Create(newContact, typeof(Contact))
+                    };
+                // Add the access token
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
+                // Specify JSON result is expected
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                // Specify odata.include-annotations preference
+                request.Headers.Add("Prefer", "odata.include-annotations=*");
+                // Send the request
+                var response = await client.SendAsync(request);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    // If successful, parse the JSON returned into a strongly typed Account
+                    newContact = await response.Content.ReadFromJsonAsync<Contact>();
+                    return newContact;
+                }
+                else
+                {
+                    logger.LogError($"Failed to create contact. Status code: {response.StatusCode}, Reason: {response.ReasonPhrase}");
+                    return null;
+                }
+            }
+            else
+            {
+                logger.LogError("Failed to get access token.");
+                return null;
+            }
+        }
+
+        catch (Exception ex)
+        {
+            logger.LogError($"An error occurred while creating contact: {ex.Message}");
+            return null;
+        }
+    }
+    }
+    
+    
+
+

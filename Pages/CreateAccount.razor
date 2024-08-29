@@ -1,0 +1,243 @@
+﻿@page "/createaccount"
+@using JWT.Auth.BlazorUi.Models
+@using JWT.Auth.BlazorUi.Services
+@using System.Net.Http.Headers
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@using Microsoft.Extensions.Logging
+@* @inject IAccountService AccountService *@
+@inject IAccessTokenProvider TokenProvider
+@inject IHttpClientFactory ClientFactory
+@inject ILogger<FetchAccounts> logger;
+@inject NavigationManager NavigationManager
+
+<h3>Crér une Compte</h3>
+
+    @if(newAccount != null)
+    {
+    <form>
+<div class="form-row">
+        <div class="form-group col-md-6">
+            <label for="inputNom">Nom</label>
+            <input type="text" class="form-control" id="inputNom" placeholder="Nom" @bind="newAccount.name">
+        </div>
+        <div class="form-group col-md-6">
+            <label for="phone">Télephone</label>
+            <input type="text" class="form-control" id="phone" placeholder="Téléphone" @bind="newAccount.telephone1">
+        </div>
+    </div>
+    <div class="form-group">
+        <label for="inputAddress">Address</label>
+        <input type="text" class="form-control" id="inputAddress" placeholder="1234 Main St city" @bind="newAccount.address1_city">
+    </div>
+            <div class="form-group">
+            <label for="selectContactFullName">Nom et email du contact principal</label>
+            <select class="form-control" id="primarycontactid" @bind="selectedContactId">
+                <option value="">Choisir un contact</option>
+                    @if (contacts != null && contacts.value != null)
+                    {
+                        @foreach (var contact in contacts.value)
+                        {
+                        <option value="@contact.contactid">@contact.fullname,(@contact.emailaddress1)</option>
+                      
+                        }
+                    }
+               
+            </select>
+            </div>
+        
+      
+     <div style="margin-top: 20px;">
+          <button type="button" class="btn btn-outline-primary" @onclick="SetParameterAsync">Sauvegarder</button>
+
+        </div>
+    </form>
+}
+else
+{
+    <p><em>@message</em></p>
+}
+
+
+@code {
+    //décalartion de variable nouvelle account
+    private Account newAccount = new Account();
+
+    [Parameter]
+    public Guid accountId { get; set; } = Guid.NewGuid();
+
+    //Liste des Contacts pour sélectionner
+    private ContactCollection contacts;
+
+    //Contains data about an error returned from the Web API
+    private Error error;
+
+    //An informational message
+    private string message = "Loading...";
+
+    // public Guid? primaryContactId { get; set; }
+    public string selectedContactId;
+
+
+    // Méthode pour capturer le nom complet et l'email du contact sélectionné
+    protected override async Task OnInitializedAsync()
+    {
+        await GetContactaAsync();
+        message = "Problème de récupération de contact";
+    }
+
+    protected async Task SetParameterAsync()
+    {
+
+        if (string.IsNullOrEmpty(newAccount.name))
+        {
+
+            logger.LogInformation("Le nom du Compte est requis");
+            return;
+        }
+
+        //newAccount.accountid = accountId;
+
+        if (Guid.TryParse(selectedContactId, out Guid contactGuid))
+        {
+
+            newAccount.primarycontactid = contacts.value.FirstOrDefault(c => c.contactid == contactGuid);
+        }
+     
+
+        newAccount.accountid = accountId;
+        await CreateAccountAsync(newAccount);
+        NavigationManager.NavigateTo($"/fetchaccounts");
+    }
+
+
+    //-------------GetContact METHOD-------------------------
+
+    private  async Task GetContactaAsync()
+    {
+        // Tries to get an access token for the current user with the default set of permissions.
+        var tokenResult = await TokenProvider.RequestAccessToken();
+
+        // If the token request was successful
+        if (tokenResult.TryGetToken(out var token))
+        {
+            //Creates an HttpClient based on the named definition found in Program.Main
+            var client = ClientFactory.CreateClient("DataverseClient");
+
+            //Prepare the request to get the data
+            var request = new HttpRequestMessage()
+                {
+                    Method = HttpMethod.Get,
+                    RequestUri = new Uri($"{client.BaseAddress}contacts?$select=fullname,emailaddress1,contactid")
+                };
+            //Add the access token
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
+            //Specify a JSON result is expected
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            //Limit the number of results to 15
+            request.Headers.Add("Prefer", "odata.maxpagesize=15");
+
+            //Send the request
+            var response = await client.SendAsync(request);
+
+            if (response.IsSuccessStatusCode)
+            {
+                //Parse the JSON returned into a strongly typed AccountCollection
+                contacts = await response.Content.ReadFromJsonAsync<ContactCollection>();
+            }
+            else
+            {
+                //Parse the JSON returned into a strongly typed Error
+                error = await response.Content.ReadFromJsonAsync<Error>();
+                error.statuscode = (int)response.StatusCode;
+                error.reason = response.ReasonPhrase;
+                //Display a message to the user
+                message = "An error occurred.";
+                //Log the details so they can be seen in the browser console
+                logger.LogError($"{error.detail.message}");
+
+            }
+
+        }
+        else
+        {
+            // Notify user that the token request was not successful
+            message = "There was a problem authenticating.";
+        }
+
+    }
+
+
+
+    //-----------CREATE Account method---------------
+    public async Task<Account> CreateAccountAsync(Account newAccount)
+    {
+        try
+        {
+
+            var tokenResult = await TokenProvider.RequestAccessToken();
+            if (tokenResult.TryGetToken(out var token))
+            {
+                var client = ClientFactory.CreateClient("DataverseClient");
+                //var requestUri = ($"{client.BaseAddress}accounts"+"?$select=name,telephone1,address1_city&"+"$expand=primarycontactid($select=fullname,emailaddress1)");
+
+                var requestUri = $"{client.BaseAddress}accounts";
+
+                // Construire le requestbody
+                var requestBody = new Dictionary<string, object>
+            {
+                { "name", newAccount.name },
+                { "telephone1", newAccount.telephone1 },
+                { "address1_city", newAccount.address1_city }
+            };
+
+                if (Guid.TryParse(selectedContactId, out Guid contactGuid))
+                {
+                    // Ajouter l'association du contact principal
+                    requestBody.Add("primarycontactid@odata.bind", $"/contacts({contactGuid})");
+                }
+
+                var request = new HttpRequestMessage()
+                    {
+                        Method = HttpMethod.Post,
+                        RequestUri = new Uri(requestUri),
+                        Content = JsonContent.Create(requestBody)
+                    };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Value);
+                //Specify a JSON result is expected
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                //Specify odata.include-annotations preference
+                request.Headers.Add("Prefer", "return=representation");
+
+                var response = await client.SendAsync(request);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    newAccount= await response.Content.ReadFromJsonAsync<Account>();
+                    return newAccount;
+                }
+                else
+                {
+                    logger.LogError($"Failed to create account. Status code: {response.StatusCode}, Reason: {response.ReasonPhrase}");
+                    return null;
+                }
+            }
+            else
+            {
+                logger.LogError("Failed to get access token.");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"An error occurred while creating account: {ex.Message}");
+            return null;
+        }
+    }
+    // The result will be a JSON object with an array of entities set to the value property
+    public class ContactCollection
+    {
+        public Contact[] value { get; set; }
+    }
+
+   
+}

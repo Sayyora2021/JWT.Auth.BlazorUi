@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "identityapp1": {
+      "connectionInfo": "Inscription d’application : P365-DynamicsBlazor, locataire : ICK SOLUTIONS (icksolutions.fr - Microsoft Entra ID)",
+      "type": "identityapp.default"
+    }
+  }
+}
